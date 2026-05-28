@@ -320,9 +320,12 @@ async def main_loop():
     await rpc.connect()
     print(f"[+] Discord RPC connected. CLIENT_ID={CLIENT_ID}")
 
-    # SC 検索用の HTTP セッションをループ全体で 1 個共有 (接続再利用)
+    # aiohttp の既定 DNS は aiodns (SelectorEventLoop 必要) だが、pypresence の
+    # Windows IPC は ProactorEventLoop 必須。ThreadedResolver に切り替えて両立させる。
+    connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
     async with aiohttp.ClientSession(
-        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) sc-rpc/1.0"}
+        connector=connector,
+        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) sc-rpc/1.0"},
     ) as http:
         last_key = ""
         last_active = False
@@ -361,8 +364,7 @@ async def main_loop():
 
 
 if __name__ == "__main__":
-    # Windows 既定の ProactorEventLoop だと aiohttp の DNS resolver (aiodns) が動かない。
-    # winsdk は COM 呼び出しなので Selector でも問題なく動くため、こちらに統一する。
-    if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # ProactorEventLoop (Windows 既定) のまま走らせる。
+    # pypresence の Discord IPC は Named Pipe -> Proactor 必須なので Selector に切り替えない。
+    # aiohttp 側は ThreadedResolver を使うことで Proactor でも動く (上の main_loop 参照)。
     asyncio.run(main_loop())
