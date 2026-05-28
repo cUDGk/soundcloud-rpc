@@ -1,3 +1,5 @@
+<div align="center">
+
 # soundcloud-rpc
 
 ### Windows の SoundCloud 再生を Discord Rich Presence に表示する常駐スクリプト
@@ -9,6 +11,8 @@
 **ブラウザで SoundCloud を流すだけで、曲名・アーティスト・ジャケット・プログレスバー・曲ページのリンクが Discord に出る。**
 
 ---
+
+</div>
 
 ## 概要
 
