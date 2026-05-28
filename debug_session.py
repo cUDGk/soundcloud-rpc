@@ -5,6 +5,13 @@ SoundCloud を再生した状態でこれを叩き、AUMID / playback_type / art
 期待通りに取れるかを目視で確認するために使う。
 """
 import asyncio
+import sys
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 from winsdk.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager as SessionManager,
 )
