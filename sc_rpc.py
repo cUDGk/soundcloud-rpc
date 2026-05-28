@@ -21,11 +21,13 @@ from winsdk.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionPlaybackStatus as PlaybackStatus,
 )
 from winsdk.windows.media import MediaPlaybackType
-from pypresence import Presence
+# 同期版 Presence は内部で event loop を回すため asyncio.run() 配下で動かない。
+# こちらは asyncio で動かすので非同期版を使う。
+from pypresence import AioPresence
 
 # ============ 設定 ============
 # Discord Developer Portal で作った Application ID をここに入れる
-CLIENT_ID = "YOUR_DISCORD_APP_ID_HERE"
+CLIENT_ID = "1509490141079535656"
 
 # True にすると、SC_APP_AUMID が空のときは「ブラウザ AUMID のセッションだけ」を採用する。
 # False なら、ブラウザでなくてもアーティスト名や除外ワードでゆるく判定する。
@@ -141,25 +143,38 @@ async def pick_soundcloud_session():
 
 def build_timestamps(info):
     """Discord RPC 用の start / end (epoch 秒) を作る。
+
+    GSMTC の position はライブカウンタではなく last_updated_time 時点のスナップショット。
+    なので「いま - position」で start を計算するとポーリング遅延の分ズレる。
+    曲が始まった絶対時刻 = last_updated_time - position を基準にすると、
+    Discord 側がいまの epoch との差分でバーを描いてくれるので常に正確になる。
+
     総尺が取れなかったり 0 なら end は None にして経過カウンターだけにフォールバック。"""
     now = time.time()
 
     try:
         position_sec = info["position"].total_seconds()
         end_sec = info["end_time"].total_seconds()
+        # last_updated_time は tz aware の UTC datetime
+        base_ts = info["last_updated"].timestamp()
     except Exception:
         return int(now), None
 
+    # GSMTC が DateTime(0) (1601-01-01) を返す異常時や、未来時刻が混入した時は now にフォールバック
+    if base_ts <= 0 or abs(now - base_ts) > 86400:
+        base_ts = now
+
+    start_epoch = int(base_ts - position_sec)
+
     if end_sec <= 0 or end_sec <= position_sec:
         # 総尺不明 -> 経過カウンターのみ
-        return int(now - position_sec), None
+        return start_epoch, None
 
-    start_epoch = int(now - position_sec)
     end_epoch = int(start_epoch + end_sec)
     return start_epoch, end_epoch
 
 
-def update_presence(rpc, info, last_key):
+async def update_presence(rpc, info, last_key):
     """Discord RPC を更新。曲が変わった時だけ標準出力にログを出す。"""
     title = info["title"]
     artist = info["artist"]
@@ -178,7 +193,7 @@ def update_presence(rpc, info, last_key):
     if end_epoch is not None:
         kwargs["end"] = end_epoch
 
-    rpc.update(**kwargs)
+    await rpc.update(**kwargs)
 
     if key != last_key:
         print(f"[♪] {title} - {artist}  (aumid={info['aumid']}, type={info['playback_type']})")
@@ -186,8 +201,8 @@ def update_presence(rpc, info, last_key):
 
 
 async def main_loop():
-    rpc = Presence(CLIENT_ID)
-    rpc.connect()
+    rpc = AioPresence(CLIENT_ID)
+    await rpc.connect()
     print(f"[+] Discord RPC connected. CLIENT_ID={CLIENT_ID}")
 
     last_key = ""
@@ -200,12 +215,12 @@ async def main_loop():
                 if info is None:
                     # 該当セッション無し -> プレゼンスを消す (前回 active だった時だけログ)
                     if last_active:
-                        rpc.clear()
+                        await rpc.clear()
                         print("[-] No SoundCloud session. Presence cleared.")
                         last_active = False
                         last_key = ""
                 else:
-                    last_key = update_presence(rpc, info, last_key)
+                    last_key = await update_presence(rpc, info, last_key)
                     last_active = True
             except Exception:
                 # 1 周分の例外は握り潰してループ継続 (RPC 再接続失敗等で落とさない)
@@ -216,7 +231,7 @@ async def main_loop():
         print("\n[!] Interrupted by user.")
     finally:
         try:
-            rpc.clear()
+            await rpc.clear()
         except Exception:
             pass
         try:
